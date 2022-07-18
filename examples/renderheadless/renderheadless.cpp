@@ -200,14 +200,18 @@ public:
 			}
 		}
 
-		const char *validationExt = VK_EXT_DEBUG_REPORT_EXTENSION_NAME;
 		if (layersAvailable) {
 			instanceCreateInfo.ppEnabledLayerNames = validationLayers;
 			instanceCreateInfo.enabledLayerCount = layerCount;
-			instanceCreateInfo.enabledExtensionCount = 1;
-			instanceCreateInfo.ppEnabledExtensionNames = &validationExt;
 		}
 #endif
+		uint32_t instanceExtensionsCount = 1;
+		const char *instanceExtensions[] = {
+			VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+		};
+		instanceCreateInfo.enabledExtensionCount = instanceExtensionsCount;
+		instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions;
+
 		VK_CHECK_RESULT(vkCreateInstance(&instanceCreateInfo, nullptr, &instance));
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
