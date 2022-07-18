@@ -135,11 +135,21 @@ public:
 	/*
 		Submit command buffer to a queue and wait for fence until queue operations have been finished
 	*/
-	void submitWork(VkCommandBuffer cmdBuffer, VkQueue queue)
+	void submitWork(VkCommandBuffer cmdBuffer, VkQueue queue, VkSemaphore wait = NULL, VkSemaphore signal = NULL)
 	{
+		VkPipelineStageFlags pipelineStageFlags = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+
 		VkSubmitInfo submitInfo = vks::initializers::submitInfo();
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &cmdBuffer;
+		submitInfo.waitSemaphoreCount = wait == NULL ? 0 : 1;
+		submitInfo.pWaitSemaphores = wait == NULL ? NULL : &wait;
+		submitInfo.signalSemaphoreCount = signal == NULL ? 0 : 1;
+		submitInfo.pSignalSemaphores = signal == NULL ? NULL : &signal;
+		if (wait != NULL) {
+			submitInfo.pWaitDstStageMask = &pipelineStageFlags;
+		}
+
 		VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo();
 		VkFence fence;
 		VK_CHECK_RESULT(vkCreateFence(device, &fenceInfo, nullptr, &fence));
@@ -205,9 +215,10 @@ public:
 			instanceCreateInfo.enabledLayerCount = layerCount;
 		}
 #endif
-		uint32_t instanceExtensionsCount = 1;
+		uint32_t instanceExtensionsCount = 2;
 		const char *instanceExtensions[] = {
 			VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+			VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
 		};
 		instanceCreateInfo.enabledExtensionCount = instanceExtensionsCount;
 		instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions;
@@ -355,7 +366,39 @@ public:
 				vkCmdCopyBuffer(copyCmd, stagingBuffer, indexBuffer, 1, &copyRegion);
 				VK_CHECK_RESULT(vkEndCommandBuffer(copyCmd));
 
-				submitWork(copyCmd, queue);
+				VkSemaphoreTypeCreateInfo binaryCreateInfo = {};
+				binaryCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+				binaryCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_BINARY;
+				binaryCreateInfo.initialValue = 0;
+
+				VkSemaphoreCreateInfo createInfo = {};
+				createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+				createInfo.pNext = &binaryCreateInfo;
+				createInfo.flags = 0;
+
+				VkSemaphore presentDone;
+				vkCreateSemaphore(device, &createInfo, NULL, &presentDone);
+
+#if 0
+				// This should signal the presentDone semaphore so that the
+				// following call to vkQueueSubmit does not get stuck on the
+				// wait semaphore.
+				VkSubmitInfo submitInfo = {};
+				submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+				submitInfo.signalSemaphoreCount = 1;
+				submitInfo.pSignalSemaphores = &presentDone;
+				vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
+#endif
+
+				// Without enabling the block above the vkQueueSubmit() call
+				// in submitWork() is supposed to *halt* because the
+				// presentDone semaphore has not been signaled yet.
+				//
+				// And this seems to work as intended on linux, however on
+				// Windows vkQueueSubmit() surprisingly does not halt, and
+				// violating this assumption can result in synchronization
+				// issues in a more complex scenario.
+				submitWork(copyCmd, queue, presentDone);
 
 				vkDestroyBuffer(device, stagingBuffer, nullptr);
 				vkFreeMemory(device, stagingMemory, nullptr);
